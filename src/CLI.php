@@ -86,6 +86,7 @@ namespace TheSeer\Autoload {
                 }
 
                 $config = $this->configure($input);
+
                 $this->factory->setConfig($config);
                 if (!$config->isQuietMode()) {
                     $this->showVersion();
@@ -106,13 +107,56 @@ namespace TheSeer\Autoload {
 
         }
 
+        private function parseComposerJson($json) {
+            $composer = json_decode($json);
+            if (!isset($composer->autoload)) {
+                throw new \Exception('No autoload node in composer.json');
+            }
+            $dirs = array();
+            $autoload = $composer->autoload;
+            if (isset($autoload->classmap)) {
+                foreach($autoload->classmap as $entry) {
+                    if (is_file($entry)) continue;
+                    $dirs[] = $entry;
+                }
+                return $dirs;
+            } else if (isset($autoload->{'psr-0'})) {
+                foreach($autoload->{'psr-0'} as $psr0) {
+                    if (is_array($psr0)) {
+                        foreach($psr0 as $dir) {
+                            $dirs[] = $dir;
+                        }
+                    } else {
+                        $dirs[] = $psr0;
+                    }
+                }
+                return $dirs;
+            }
+            throw new \Exception('Unsupported autoload method in composer.json');
+        }
+
         /**
          * @param \ezcConsoleInput $input
          *
          * @return \TheSeer\Autoload\Config
          */
         private function configure(\ezcConsoleInput $input) {
-            $config = new Config($input->getArguments());
+            $args = $input->getArguments();
+            switch(count($args)) {
+                case 0: {
+                    $args = array('./composer.json');
+                }
+                case 1: {
+                    if (strpos($args[0],'composer.json') && is_file($args[0])) {
+                        $args = $this->parseComposerJson(file_get_contents($args[0]));
+                    }
+                }
+                default: {
+                    $directories = $args;
+                }
+            }
+
+            $config = new Config($directories);
             if ($input->getOption('quiet')->value) {
                 $config->setQuietMode(TRUE);
             }
@@ -207,7 +251,7 @@ namespace TheSeer\Autoload {
          */
         protected function showUsage() {
             print <<<EOF
-Usage: phpab [switches] <directory1> [...<directoryN>]
+Usage: phpab [switches] [<directory1>...<directoryN>|/path/to/composer.json]
 
   -i, --include       File pattern to include (default: *.php)
   -e, --exclude       File pattern to exclude
@@ -405,9 +449,11 @@ EOF;
             ));
 
             $input->argumentDefinition = new \ezcConsoleArguments();
+
             $input->argumentDefinition[0] = new \ezcConsoleArgument( "directory" );
             $input->argumentDefinition[0]->shorthelp = "The directory to process.";
             $input->argumentDefinition[0]->multiple = TRUE;
+            $input->argumentDefinition[0]->mandatory = FALSE;
 
             return $input;
         }
